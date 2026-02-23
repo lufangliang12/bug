@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全国大学分布地图</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body, html { width: 100%; height: 100%; font-family: "Microsoft YaHei", sans-serif; background: #1a1a2e; }
+        #container { width: 100%; height: 100%; }
+        .title-bar {
+            position: absolute; top: 0; left: 0; right: 0; height: 50px;
+            background: linear-gradient(135deg, #16213e 0%, #0f3460 100%);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 1000; box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+        .title-bar h1 { color: #e94560; font-size: 20px; text-shadow: 0 0 10px rgba(233,69,96,0.5); }
+        .control-panel {
+            position: absolute; top: 60px; right: 10px;
+            background: #16213e; border-radius: 8px; padding: 12px;
+            z-index: 1000; box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+            border: 1px solid #0f3460;
+        }
+        .control-item { margin: 10px 0; display: flex; align-items: center; font-size: 12px; color: #eee; }
+        .control-item label { margin-right: 10px; min-width: 50px; }
+        .control-item input[type="checkbox"] {
+            width: 18px; height: 18px; accent-color: #e94560; cursor: pointer;
+        }
+        .control-item input[type="range"] {
+            accent-color: #e94560; cursor: pointer;
+        }
+        .stats-panel {
+            position: absolute; bottom: 20px; left: 10px;
+            background: #16213e; border-radius: 8px; padding: 12px;
+            z-index: 1000; box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+            border: 1px solid #0f3460; font-size: 12px; color: #ccc;
+        }
+        .stats-panel .number { color: #e94560; font-weight: bold; font-size: 14px; }
+        .search-box { position: absolute; top: 60px; left: 10px; z-index: 1000; display: flex; }
+        .search-box input { 
+            width: 180px; padding: 10px 12px; border: none; border-radius: 6px 0 0 6px; 
+            font-size: 13px; background: #16213e; color: #eee;
+            border: 1px solid #0f3460; border-right: none;
+        }
+        .search-box input::placeholder { color: #666; }
+        .search-box input:focus { outline: none; border-color: #e94560; }
+        .search-box button { 
+            padding: 10px 18px; background: linear-gradient(135deg, #e94560 0%, #c73659 100%);
+            color: white; border: none; border-radius: 0 6px 6px 0; cursor: pointer;
+            font-weight: bold; transition: all 0.3s;
+        }
+        .search-box button:hover { 
+            background: linear-gradient(135deg, #ff6b6b 0%, #e94560 100%);
+            box-shadow: 0 0 15px rgba(233,69,96,0.5);
+        }
+        .tip {
+            position: absolute; top: 100px; left: 10px;
+            background: rgba(22, 33, 62, 0.95); color: #e94560;
+            padding: 10px 14px; border-radius: 8px; z-index: 1000; font-size: 12px;
+            border: 1px solid #0f3460;
+        }
+        .loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: #16213e; padding: 25px 35px; border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 2000; font-size: 14px;
+            color: #e94560; border: 1px solid #0f3460;
+        }
+        .loading::after {
+            content: ''; display: inline-block; width: 20px; height: 20px;
+            border: 2px solid #e94560; border-top-color: transparent;
+            border-radius: 50%; animation: spin 1s linear infinite;
+            margin-left: 10px; vertical-align: middle;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="title-bar"><h1>全国高等院校分布地图</h1></div>
+    <div class="search-box">
+        <input type="text" id="searchInput" placeholder="搜索学校...">
+        <button onclick="searchSchool()">搜索</button>
+    </div>
+    <div class="tip" id="tip">💡 点击红点查看学校名称</div>
+    <div class="control-panel">
+        <div class="control-item">
+            <label>热力图</label>
+            <input type="checkbox" id="heatToggle" checked onchange="toggleHeat()">
+        </div>
+        <div class="control-item">
+            <label>标记点</label>
+            <input type="checkbox" id="markerToggle" checked onchange="toggleMarkers()">
+        </div>
+        <div class="control-item">
+            <label>半径</label>
+            <input type="range" id="radius" min="10" max="60" value="25" style="width:80px" onchange="updateHeat()">
+        </div>
+    </div>
+    <div class="stats-panel">
+        <div>学校总数：<span class="number" id="total">0</span></div>
+        <div>当前显示：<span class="number" id="shown">0</span></div>
+    </div>
+    <div id="container"></div>
+    <div class="loading" id="loading">正在加载地图数据</div>
+
+    <script src="schools_min.js"></script>
+    <script src="https://api.map.baidu.com/api?v=3.0&ak=f1t7TGn7vWAf8GylV43YtvD4d9hp3fTf&callback=initMap"></script>
+    <script>
+        var map, heat, markerCluster, markers = [], markersLoaded = false;
+        
+        function initMap() {
+            map = new BMap.Map("container");
+            map.centerAndZoom(new BMap.Point(105, 35), 5);
+            map.enableScrollWheelZoom(true);
+            map.addControl(new BMap.NavigationControl());
+            
+            document.getElementById('total').textContent = schools.length.toLocaleString();
+            document.getElementById('shown').textContent = schools.length.toLocaleString();
+            
+            loadHeatmapLib();
+            
+            map.addEventListener('moveend', updateVisibleCount);
+            map.addEventListener('zoomend', updateVisibleCount);
+        }
+        
+        function loadHeatmapLib() {
+            var script = document.createElement('script');
+            script.src = 'https://api.map.baidu.com/library/Heatmap/2.0/src/Heatmap_min.js';
+            script.onload = function() {
+                initHeat();
+                loadTextIconOverlay();
+            };
+            document.head.appendChild(script);
+        }
+        
+        function loadTextIconOverlay() {
+            var script = document.createElement('script');
+            script.src = 'https://api.map.baidu.com/library/TextIconOverlay/1.2/src/TextIconOverlay_min.js';
+            script.onload = function() {
+                loadClusterLib();
+            };
+            document.head.appendChild(script);
+        }
+        
+        function loadClusterLib() {
+            var script = document.createElement('script');
+            script.src = 'https://api.map.baidu.com/library/MarkerClusterer/1.2/src/MarkerClusterer_min.js';
+            script.onload = function() {
+                initMarkers();
+                document.getElementById('loading').style.display = 'none';
+            };
+            document.head.appendChild(script);
+        }
+        
+        function initHeat() {
+            var data = schools.map(function(s) {
+                return { lng: s[1], lat: s[2], count: 80 };
+            });
+            heat = new BMapLib.HeatmapOverlay({ 
+                radius: 25, 
+                opacity: 0.85,
+                gradient: {
+                    0: '#1a1a2e',
+                    0.2: '#0f3460',
+                    0.4: '#16213e',
+                    0.6: '#e94560',
+                    0.8: '#ff6b6b',
+                    1.0: '#ff9a9a'
+                }
+            });
+            map.addOverlay(heat);
+            heat.setDataSet({ data: data, max: 150 });
+        }
+        
+        function updateHeat() {
+            if (!heat) return;
+            map.removeOverlay(heat);
+            var data = schools.map(function(s) {
+                return { lng: s[1], lat: s[2], count: 80 };
+            });
+            heat = new BMapLib.HeatmapOverlay({ 
+                radius: parseInt(document.getElementById('radius').value), 
+                opacity: 0.85,
+                gradient: {
+                    0: '#1a1a2e',
+                    0.2: '#0f3460',
+                    0.4: '#16213e',
+                    0.6: '#e94560',
+                    0.8: '#ff6b6b',
+                    1.0: '#ff9a9a'
+                }
+            });
+            map.addOverlay(heat);
+            heat.setDataSet({ data: data, max: 150 });
+            if (!document.getElementById('heatToggle').checked) heat.hide();
+        }
+        
+        function initMarkers() {
+            if (markersLoaded) return;
+            if (!document.getElementById('markerToggle').checked) {
+                document.getElementById('shown').textContent = '0';
+                return;
+            }
+            
+            markers = [];
+            
+            var markerIcon = new BMap.Icon(
+                'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" fill="%23e94560"/></svg>',
+                new BMap.Size(12, 12),
+                { anchor: new BMap.Size(6, 6) }
+            );
+            
+            for (var i = 0; i < schools.length; i++) {
+                var s = schools[i];
+                var pt = new BMap.Point(s[1], s[2]);
+                var mk = new BMap.Marker(pt, { icon: markerIcon });
+                mk.schoolName = s[0];
+                (function(marker) {
+                    marker.addEventListener('click', function() {
+                        var infoWindow = new BMap.InfoWindow('<b style="color:#e94560">' + marker.schoolName + '</b>', {
+                            backgroundColor: '#16213e',
+                            borderColor: '#0f3460',
+                            titleColor: '#e94560'
+                        });
+                        map.openInfoWindow(infoWindow, marker.getPosition());
+                    });
+                })(mk);
+                markers.push(mk);
+            }
+            
+            markerCluster = new BMapLib.MarkerClusterer(map, { markers: markers });
+            markersLoaded = true;
+        }
+        
+        function updateVisibleCount() {
+            if (!document.getElementById('markerToggle').checked || !markersLoaded) {
+                return;
+            }
+            
+            var bounds = map.getBounds();
+            if (!bounds) return;
+            
+            var sw = bounds.getSouthWest();
+            var ne = bounds.getNorthEast();
+            var count = 0;
+            
+            for (var i = 0; i < schools.length; i++) {
+                var s = schools[i];
+                if (s[1] >= sw.lng && s[1] <= ne.lng && s[2] >= sw.lat && s[2] <= ne.lat) {
+                    count++;
+                }
+            }
+            document.getElementById('shown').textContent = count.toLocaleString();
+        }
+        
+        function toggleHeat() {
+            if (heat) {
+                document.getElementById('heatToggle').checked ? heat.show() : heat.hide();
+            }
+        }
+        
+        function toggleMarkers() {
+            if (document.getElementById('markerToggle').checked) {
+                if (!markersLoaded) {
+                    initMarkers();
+                } else if (markerCluster) {
+                    markerCluster = new BMapLib.MarkerClusterer(map, { markers: markers });
+                }
+                document.getElementById('shown').textContent = schools.length.toLocaleString();
+            } else {
+                if (markerCluster) {
+                    markerCluster.clearMarkers();
+                }
+                document.getElementById('shown').textContent = '0';
+            }
+        }
+        
+        function searchSchool() {
+            var kw = document.getElementById('searchInput').value.trim().toLowerCase();
+            if (!kw) return;
+            
+            var found = schools.find(function(s) { return s[0].toLowerCase().indexOf(kw) !== -1; });
+            if (found) {
+                var pt = new BMap.Point(found[1], found[2]);
+                map.centerAndZoom(pt, 15);
+                setTimeout(function() {
+                    var infoWindow = new BMap.InfoWindow('<b style="color:#e94560">' + found[0] + '</b>', {
+                        backgroundColor: '#16213e',
+                        borderColor: '#0f3460'
+                    });
+                    map.openInfoWindow(infoWindow, pt);
+                }, 300);
+            } else {
+                alert('未找到: ' + kw);
+            }
+        }
+        
+        document.getElementById('searchInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') searchSchool();
+        });
+    </script>
+</body>
+</html>
